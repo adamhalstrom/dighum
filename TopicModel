@@ -1,0 +1,110 @@
+setwd("~/Dropbox/University/Digital Humanities Collaboratory/TextAnalysisWithR")
+source("code/Functions.R")
+library(stringr)
+input.dir <- "data/plainText"
+files.v <- dir(path=input.dir, pattern=".*txt")
+
+book.freqs.1 <- list()
+# a list object to hold the results
+for(i in 1:length(files.v)){
+  doc.object <-scan(file.path(input.dir, files.v[i]), what="character",quote="")
+  #scanning and reading txt files in that folder
+  worddata <- getwordtablelist(doc.object)
+  book.freqs.1[[files.v[i]]] <- worddata
+  #get a frequency word table from a set of texts and put the output into a list
+}
+
+#topic model parameters
+chunk.size <- 100 #set chunk size in number of words
+topic.number <- 35 #set number of topics
+
+    #parameter checks
+    chunk.size
+    topic.number
+
+# read files (doc.object), break into segments (chunk.m), label numerically (textname) and put into a new matrix object called "segments.m" which will be row-bound to a matrix object "topic.m"
+topic.m <- NULL
+for(i in 1:length(files.v)){
+  doc.object <-scan(file.path(input.dir, files.v[i]), what="character", quote = "")
+  chunk.m <- makeFlexTextChunks(doc.object, chunk.size, percentage=FALSE)
+  textname <- gsub("\\..*", "", files.v[i])
+  segments.m <- cbind(paste(textname, segment=1:nrow(chunk.m), sep="_"), chunk.m)
+  topic.m <- rbind(topic.m, segments.m)
+}
+
+    # convert into matrix into dataframe
+    documents <- as.data.frame(topic.m, stringsAsFactors=F)
+    colnames(documents) <- c("id", "text")
+    # get data ready to work in mallet
+    library(mallet)
+    mallet.instances <- mallet.import(documents$id, documents$text, "data/stoplist.csv", FALSE, token.regexp = "[\\p{L}']+")
+    topic.model <- MalletLDA(num.topics=topic.number) #topic.number is set under "topic model parameters" above
+    topic.model$loadDocuments(mallet.instances)
+    vocabulary <- topic.model$getVocabulary()
+    word.freqs <- mallet.word.freqs(topic.model)
+    head(word.freqs)
+    topic.model$train(400)
+    
+# run the topic model
+topic.words.m <- mallet.topic.words(topic.model, smoothed=TRUE, normalized=TRUE)
+  # generated matrix where each row is a topic and each column a unique word in corpus
+  vocabulary <- topic.model$getVocabulary()
+  colnames(topic.words.m) <- vocabulary
+  topic.words.m[1:3, 1:3] # first three words in matrix
+    # now looking at relative weight of specific word types based on their arranged positions
+    keywords <- c("code", "coding")
+    topic.words.m[, keywords]
+      # the relative weight of my keywords (the two words in quotations) in each of the topics
+      imp.row <- which(rowSums(topic.words.m[, keywords])==max(rowSums(topic.words.m[, keywords])))
+      #which of the topic rows has the highest concentration of both key terms
+      imp.row
+      mallet.top.words(topic.model, topic.words.m[imp.row,], 13)
+      # looking at the ranked sorting of topic words for the row with the highest concentration of both my key terms
+
+# wordcloud for "important" topic with 50 words.
+library(wordcloud)
+topic.top.words <- mallet.top.words(topic.model, topic.words.m[imp.row,], 50)
+wordcloud(topic.top.words$words, topic.top.words$weights, c(4, .8), rot.per=0, random.order=F)
+
+
+# print 20 top words from each of the 25 topics
+for (i in 1:35){
+  topic.top.words <- mallet.top.words(topic.model, topic.words.m[i,], 20)
+  cat("\n-----------------------", i, "-------------------------\n")
+  cat(topic.top.words$words)
+}
+chunk.size
+topic.number
+
+# make wordcloud for each of my 25 topics
+for (i in 1:25){
+  topic.top.words <- mallet.top.words(topic.model, topic.words.m[i,], 50)
+  print(wordcloud(topic.top.words$words, topic.top.words$weights, c(4, .8), rot.per=0, random.order=F))
+}
+
+
+doc.topics.m <- mallet.doc.topics(topic.model, smoothed=T, normalized=T)
+# made a matrix object in which each column is a topic and each row is a document from the corpus (remember "document" is a 1000 word hunk of text, not the whole report/article).  The values of the cells in the matrix are the corresponding possibilities of a given topic (column) in a given document (row).
+file.ids.v <- documents[,1]
+head(file.ids.v)
+file.id.1 <- strsplit(file.ids.v, "_")
+file.chunk.id.1 <- lapply(file.id.1, rbind)
+file.chunk.id.m <- do.call(rbind, file.chunk.id.1)
+head(file.chunk.id.m)
+# made a 2 column matrix out of the txt file title and the number assigned to it during chunking. Used the "_" as the separator for the columns, so txt file names shouldn't have underscores in them for this to work.
+doc.topics.df <- as.data.frame(doc.topics.m)
+# saved my doc.topics matrix as a dataframe, so that it can hold both text and numbers.
+doc.topics.df <- cbind(file.chunk.id.m[,1], doc.topics.df)
+# bound doc.topics dataframe (columns are topics and rows are documents from corpus) to the file.chunk.id (columns are txt file names and doc id number) each row is a document from the corpus (like the doc.topics I bound it to).
+doc.topic.means.df <- aggregate(doc.topics.df[, 2:ncol(doc.topics.df)], list(doc.topics.df[,1]),mean)
+barplot(doc.topic.means.df[, "V4"], names.arg=c(1:60), xlab="Texts Arranged by Date", ylab="'Lui' Topic Probs")
+# made a barplot of probability that topic "V_" is in each txt document.
+filename <- as.character(doc.topic.means.df[25, "Group.1"])
+filename
+# got the filename for document 25, since the barplot showed me it's dominated by one topic.
+doc.topic.means.df
+# to look at a matrix of each row is one of my reports, and each column is one of the 25 topics I set it to sort them into.  
+target.topic <- 4
+topic.top.words <- mallet.top.words(topic.model, topic.words.m[target.topic,], 50)
+wordcloud(topic.top.words$words, topic.top.words$weights, c(4, .8), rot.per=0, random.order=F)
+# made a wordcloud of topic 4
